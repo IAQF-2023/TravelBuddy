@@ -1,11 +1,15 @@
 package com.example.travelbuddy;
 
+import static android.content.ContentValues.TAG;
+
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Toast;
+import android.content.pm.ApplicationInfo;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
@@ -19,12 +23,15 @@ import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.tasks.Task;
+import com.google.android.libraries.places.api.Places;
 import com.google.android.libraries.places.api.model.Place;
 import com.google.android.libraries.places.api.model.PlaceLikelihood;
 import com.google.android.libraries.places.api.model.RectangularBounds;
@@ -69,9 +76,15 @@ import com.google.android.libraries.places.api.model.TypeFilter;
 import com.google.android.libraries.places.api.model.LocationBias;
 import com.google.android.libraries.places.api.model.LocationRestriction;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -149,68 +162,85 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
                 LatLng currentLatLng = new LatLng(latitude, longitude);
 
                 // Add a marker on the user's current location
-                mMap.addMarker(new MarkerOptions().position(currentLatLng).title("You are here"));
+              mMap.addMarker(new MarkerOptions().position(currentLatLng).title("You are here"));
 
                 // Move the camera to the user's current location
                 mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, 15));
-                fetchNearbyPlaces(currentLatLng);
+               // fetchNearbyPlaces(currentLatLng);
+                try {
+                    getNearbyRestaurants(latitude, longitude);
+                } catch (PackageManager.NameNotFoundException e) {
+                    throw new RuntimeException(e);
+                }
 
             } else {
+                requestLocationPermissions();
                 Toast.makeText(this, "Unable to get current location", Toast.LENGTH_SHORT).show();
             }
         });
     }
-    private void fetchNearbyPlaces(LatLng currentLatLng) {
-        List<Place.Field> placeFields = Arrays.asList(Place.Field.NAME, Place.Field.ADDRESS, Place.Field.LAT_LNG);
 
-        bounds = RectangularBounds.newInstance(currentLatLng, currentLatLng);
-        typeFilter = TypeFilter.valueOf(category.toUpperCase());
+    private void getNearbyRestaurants(double latitude, double longitude) throws PackageManager.NameNotFoundException {
+        LatLng currentLatLng = new LatLng(latitude, longitude);
+        double radiusInMeters = 5000; // 5 km
 
+        // Use the Nearby Search API to search for nearby restaurants
+        ApplicationInfo appInfo = getPackageManager().getApplicationInfo(getPackageName(), PackageManager.GET_META_DATA);
+        String apiKey = appInfo.metaData.getString("com.google.android.geo.API_KEY");
+        String url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=" +
+                currentLatLng.latitude + "," + currentLatLng.longitude +
+                "&radius=" + radiusInMeters +
+                "&type=" + category.toUpperCase() +
+                "&key=" + apiKey;
 
-//        FindCurrentPlaceRequest request = FindCurrentPlaceRequest.builder(placeFields)
-//                .build();
+        OkHttpClient client = new OkHttpClient();
+        Request request = new Request.Builder().url(url).build();
 
-        // Check if the category is valid
-        TypeFilter typeFilter = null;
-        try {
-            typeFilter = TypeFilter.valueOf(category.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        }
+        client.newCall(request).enqueue(new okhttp3.Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                e.printStackTrace();
+            }
 
-        FindCurrentPlaceRequest request = FindCurrentPlaceRequest.builder(placeFields)
-                .setLocationBias(bounds)
-                .setTypeFilter(typeFilter)
-                .build();
-
-
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            requestLocationPermissions();
-            return;
-        }
-
-        Task<FindCurrentPlaceResponse> placeResponseTask = placesClient.findCurrentPlace(request);
-        placeResponseTask.addOnCompleteListener(task -> {
-            if (task.isSuccessful()) {
-                FindCurrentPlaceResponse response = task.getResult();
-                for (PlaceLikelihood placeLikelihood : response.getPlaceLikelihoods()) {
-                    Place place = placeLikelihood.getPlace();
-                    LatLng placeLatLng = place.getLatLng();
-                    if (placeLatLng != null) {
-                        String markerTitle = place.getName() + ": " + place.getAddress();
-                        mMap.addMarker(new MarkerOptions().position(placeLatLng).title(markerTitle));
-                    }
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    throw new IOException("Unexpected code " + response);
                 }
-            } else {
-                Exception exception = task.getException();
-                if (exception instanceof ApiException) {
-                    ApiException apiException = (ApiException) exception;
-                    Toast.makeText(this, "Error fetching nearby places: " + apiException.getStatusCode(), Toast.LENGTH_SHORT).show();
+
+                String responseBody = response.body().string();
+                try {
+                    JSONObject json = new JSONObject(responseBody);
+                    JSONArray results = json.getJSONArray("results");
+                    for (int i = 0; i < results.length(); i++) {
+                        JSONObject result = results.getJSONObject(i);
+                        JSONObject location = result.getJSONObject("geometry").getJSONObject("location");
+                        String name = result.getString("name");
+                        String address = result.getString("vicinity");
+                        double lat = location.getDouble("lat");
+                        double lng = location.getDouble("lng");
+                        LatLng placeLatLng = new LatLng(lat, lng);
+
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                mMap.addMarker(new MarkerOptions()
+                                        .position(placeLatLng)
+                                        .title(name)
+                                        .snippet(address));
+                            }
+                        });
+                    }
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
             }
         });
     }
+
+
 
 
 }
