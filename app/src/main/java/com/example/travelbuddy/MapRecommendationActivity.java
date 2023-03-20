@@ -168,7 +168,7 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
                 mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, 15));
                // fetchNearbyPlaces(currentLatLng);
                 try {
-                    getNearbyRestaurants(latitude, longitude);
+                    getNearbyPlacesBasedOnCategory(latitude, longitude);
                 } catch (PackageManager.NameNotFoundException e) {
                     throw new RuntimeException(e);
                 }
@@ -180,7 +180,7 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
         });
     }
 
-    private void getNearbyRestaurants(double latitude, double longitude) throws PackageManager.NameNotFoundException {
+    private void getNearbyPlacesBasedOnCategory(double latitude, double longitude) throws PackageManager.NameNotFoundException {
         LatLng currentLatLng = new LatLng(latitude, longitude);
         double radiusInMeters = 5000; // 5 km
 
