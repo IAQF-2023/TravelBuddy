@@ -1,54 +1,40 @@
 package com.example.travelbuddy;
+import com.example.travelbuddy.AppwriteUserHelper;
 
-import static android.content.ContentValues.TAG;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.MenuItem;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.content.pm.ApplicationInfo;
 
-import androidx.annotation.NonNull;
-import androidx.core.app.ActivityCompat;
-import androidx.fragment.app.FragmentActivity;
+import java.util.UUID;
 
-import com.google.android.gms.common.api.ApiException;
-import com.google.android.gms.location.FusedLocationProviderClient;
-import com.google.android.gms.location.LocationServices;
-import com.google.android.gms.maps.CameraUpdateFactory;
-import com.google.android.gms.maps.GoogleMap;
-import com.google.android.gms.maps.OnMapReadyCallback;
-import com.google.android.gms.maps.SupportMapFragment;
-import com.google.android.gms.maps.model.LatLng;
-import com.google.android.gms.maps.model.LatLngBounds;
-import com.google.android.gms.maps.model.MarkerOptions;
-import com.google.android.gms.tasks.OnCompleteListener;
-import com.google.android.gms.tasks.Task;
+import io.appwrite.Client;
+import io.appwrite.coroutines.CoroutineCallback;
+import io.appwrite.exceptions.AppwriteException;
 
-import com.google.android.gms.maps.model.LatLng;
-import com.google.android.gms.maps.model.MarkerOptions;
-import com.google.android.gms.tasks.Task;
-import com.google.android.libraries.places.api.Places;
-import com.google.android.libraries.places.api.model.Place;
-import com.google.android.libraries.places.api.model.PlaceLikelihood;
-import com.google.android.libraries.places.api.model.RectangularBounds;
-import com.google.android.libraries.places.api.model.TypeFilter;
-import com.google.android.libraries.places.api.net.FindCurrentPlaceRequest;
-import com.google.android.libraries.places.api.net.FindCurrentPlaceResponse;
+import io.appwrite.services.Account;
+import io.appwrite.services.Databases;
 
-import android.Manifest;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.location.Location;
-import android.os.Bundle;
-import android.widget.Toast;
+
+
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
+import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentActivity;
+import androidx.fragment.app.FragmentManager;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
@@ -57,32 +43,27 @@ import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.tasks.Task;
-import com.google.android.libraries.places.api.model.Place;
-import com.google.android.libraries.places.api.model.PlaceLikelihood;
+
 import com.google.android.libraries.places.api.model.RectangularBounds;
 import com.google.android.libraries.places.api.model.TypeFilter;
-import com.google.android.libraries.places.api.net.FindCurrentPlaceRequest;
-import com.google.android.libraries.places.api.net.FindCurrentPlaceResponse;
 import com.google.android.libraries.places.api.net.PlacesClient;
-import com.google.maps.android.PolyUtil;
-import com.google.maps.android.SphericalUtil;
-//import com.google.android.libraries.places.api.model.FindCurrentPlaceRequest;
-import com.google.android.libraries.places.api.model.Place;
-import com.google.android.libraries.places.api.model.Place.Field;
-import com.google.android.libraries.places.api.model.RectangularBounds;
-import com.google.android.libraries.places.api.model.TypeFilter;
-import com.google.android.libraries.places.api.model.LocationBias;
-import com.google.android.libraries.places.api.model.LocationRestriction;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
+import com.google.android.material.navigation.NavigationBarView;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
@@ -92,6 +73,14 @@ import okhttp3.Response;
 
 public class MapRecommendationActivity extends FragmentActivity implements OnMapReadyCallback {
     private static final String PLACES_API_BASE_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json";
+
+    private Fragment homeFragment;
+    private Fragment searchFragment;
+    private String userId;
+    private AppwriteUserHelper appwriteUserHelper;
+
+    private Fragment activeFragment;
+    private FragmentManager fragmentManager;
 
     private GoogleMap mMap;
     private String category;
@@ -104,6 +93,10 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_map_recommendation);
+        AppwriteClientManager.initialize(this);
+
+        appwriteUserHelper = new AppwriteUserHelper();
+        userId = appwriteUserHelper.getUserId();
 
         // Get the intent and the category
         Intent intent = getIntent();
@@ -112,15 +105,140 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager().findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
+
+
+        BottomNavigationView bottomNavigationView = findViewById(R.id.bottomNavigationView);
+        // Initialize your fragments
+        homeFragment = getSupportFragmentManager().findFragmentById(R.id.map);
+       // searchFragment = new FragmentA(); // Replace with your desired fragment
+        AccountFragment accountFragment = new AccountFragment();
+
+        fragmentManager = getSupportFragmentManager();
+
+        // Set the initial fragment
+       // fragmentManager.beginTransaction().add(R.id.fragmentContainer, searchFragment).hide(searchFragment).commit();
+        fragmentManager.beginTransaction().add(R.id.fragmentContainer, accountFragment).hide(accountFragment).commit();
+        activeFragment = homeFragment;
+
+        // Set up the BottomNavigationView listener
+        bottomNavigationView.setOnItemSelectedListener(new NavigationBarView.OnItemSelectedListener() {
+            @Override
+            public boolean onNavigationItemSelected(@NonNull MenuItem item) {
+                switch (item.getItemId()) {
+                    case R.id.navigation_home:
+                        replaceFragment(homeFragment);
+                        return true;
+                    // case R.id.navigation_search:
+                    //     replaceFragment(searchFragment);
+                    //     return true;
+                    case R.id.navigation_account:
+                        replaceFragment(accountFragment);
+                        return true;
+                }
+                return false;
+            }
+        });
+
     }
 
+    private void replaceFragment(Fragment fragment) {
+        if (activeFragment != fragment) {
+            fragmentManager.beginTransaction().hide(activeFragment).show(fragment).commit();
+            activeFragment = fragment;
+        }
+    }
+
+    @SuppressLint("PotentialBehaviorOverride")
     @Override
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
+
+        mMap.setInfoWindowAdapter(new CustomInfoWindowAdapter(this));
+
+        mMap.setOnInfoWindowClickListener(marker -> {
+            // Show a custom dialog or bottom sheet with interactive elements
+            showBottomSheet(marker);
+        });
+
+
         requestLocationPermissions();
         // Use the Places API to search for nearby places based on the selected category
         // and add markers to the map
     }
+
+    private void showBottomSheet(Marker marker) {
+        // Inflate the bottom sheet view
+        View bottomSheetView = LayoutInflater.from(this).inflate(R.layout.bottom_sheet, null);
+        TextView titleView = bottomSheetView.findViewById(R.id.bottom_sheet_title);
+        TextView snippetView = bottomSheetView.findViewById(R.id.bottom_sheet_snippet);
+        Button addButton = bottomSheetView.findViewById(R.id.add_to_list_button);
+
+        titleView.setText(marker.getTitle());
+        snippetView.setText(marker.getSnippet());
+
+        // Set the click listener for the "Add to list" button
+        addButton.setOnClickListener(v -> {
+            // Show the AlertDialog when the button is clicked
+            new AlertDialog.Builder(MapRecommendationActivity.this)
+                    .setTitle("Add to list")
+                    .setMessage("Are you sure you want to add '" + marker.getTitle() + "' to your list?")
+                    .setPositiveButton("Yes, add it!", (dialog, which) -> {
+                        // Call the addPlaceToAppwrite() function to save the place
+                        try {
+                            addPlaceToAppwrite(marker.getTitle(), marker.getSnippet(), marker.getPosition().latitude, marker.getPosition().longitude);
+                        } catch (AppwriteException e) {
+                            throw new RuntimeException(e);
+                        }
+                        Toast.makeText(MapRecommendationActivity.this, "Added: " + marker.getTitle(), Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton("No, cancel", null) // No action needed for the negative button
+                    .show();
+        });
+
+        // Show the bottom sheet
+        BottomSheetDialog bottomSheetDialog = new BottomSheetDialog(this);
+        bottomSheetDialog.setContentView(bottomSheetView);
+        bottomSheetDialog.show();
+    }
+
+
+    private void addPlaceToAppwrite(String name, String address, double latitude, double longitude) throws AppwriteException {
+        Client client = AppwriteClientManager.getClient();
+        Account account = AppwriteClientManager.getAccount();
+        Databases databases = AppwriteClientManager.getDatabase();
+
+
+        // Do something with the userId here
+            Map<String, Object> placeData = new HashMap<>();
+            placeData.put("name", name);
+            placeData.put("address", address);
+            placeData.put("latitude", latitude);
+            placeData.put("longitude", longitude);
+        placeData.put("userId", userId);
+
+
+            String uniqueDocumentId = UUID.randomUUID().toString();
+
+            databases.createDocument(
+                    "641e5388852e4b190226",
+                    "641e53904d90ec403156",
+                    uniqueDocumentId,
+                    placeData,
+                    new CoroutineCallback<>((result, error) -> {
+                        if (error != null) {
+                            Log.d("Appwrite", "error" + name + address + latitude + longitude);
+                            error.printStackTrace();
+                            return;
+                        }
+
+                        Log.d("Appwrite", result.toString());
+                        Log.d("Appwrite", "Place added successfully:");
+                    })
+            );
+
+        }
+
+
 
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 1;
 
@@ -190,7 +308,7 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
         String url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=" +
                 currentLatLng.latitude + "," + currentLatLng.longitude +
                 "&radius=" + radiusInMeters +
-                "&type=" + category.toUpperCase() +
+                "&type=" + category +
                 "&key=" + apiKey;
 
         OkHttpClient client = new OkHttpClient();
@@ -239,8 +357,4 @@ public class MapRecommendationActivity extends FragmentActivity implements OnMap
             }
         });
     }
-
-
-
-
 }
