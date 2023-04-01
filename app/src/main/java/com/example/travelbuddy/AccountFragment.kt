@@ -1,15 +1,16 @@
 package com.example.travelbuddy
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.appwrite.Query
 import io.appwrite.exceptions.AppwriteException
@@ -21,48 +22,67 @@ import org.json.JSONObject
  * A fragment representing a list of Items.
  */
 class AccountFragment : Fragment() {
-    private var mColumnCount = 2
-    var appwriteUserHelper: AppwriteUserHelper? = null
-    var userId: String? = null
-
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        arguments?.let {
-            mColumnCount = it.getInt(ARG_COLUMN_COUNT)
-        }
-
-        AppwriteClientManager.initialize(requireContext())
-        Toast.makeText(this.context, "oncreate AccountFargment", Toast.LENGTH_SHORT).show()
-        appwriteUserHelper = AppwriteUserHelper()
-        userId = appwriteUserHelper!!.getUserId()
-
-    }
+    private var mColumnCount = 1
+    private lateinit var recyclerView: RecyclerView
 
     override fun onCreateView(
             inflater: LayoutInflater, container: ViewGroup?,
             savedInstanceState: Bundle?
     ): View? {
+
         val view = inflater.inflate(R.layout.fragment_item_list, container, false)
 
-        if (view is RecyclerView) {
-            val context = view.context
-            if (mColumnCount <= 1) {
-                view.layoutManager = LinearLayoutManager(context)
-            } else {
-                view.layoutManager = GridLayoutManager(context, mColumnCount)
-            }
-
-            // Launch a coroutine to fetch places
+        val logoutButton = view.findViewById<Button>(R.id.logout_button)
+        logoutButton.setOnClickListener {
             lifecycleScope.launch {
-                val places = fetchPlacesFromAppwrite()
-                view.adapter = PlacesItemRecyclerViewAdapter(places)
+                logoutAndNavigateToMainActivity()
             }
         }
+
+        // Find the RecyclerView by its ID
+        recyclerView = view.findViewById<RecyclerView>(R.id.list)
+        val context = recyclerView.context
+        recyclerView.adapter = null
+        recyclerView.recycledViewPool.clear()
+
+        recyclerView.layoutManager = GridLayoutManager(context, mColumnCount)
+
+        // Launch a coroutine to fetch places
+        lifecycleScope.launch {
+            val places = fetchPlacesFromAppwrite()
+            recyclerView.adapter = PlacesItemRecyclerViewAdapter(places)
+        }
+
         return view
     }
 
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch {
+            val places = fetchPlacesFromAppwrite()
+            recyclerView.adapter = PlacesItemRecyclerViewAdapter(places)
+        }
+    }
+
+
+private suspend fun logoutAndNavigateToMainActivity() {
+        // Log out the user using the Appwrite SDK
+        try {
+            AppwriteClientManager.getAccount().deleteSessions()
+            Toast.makeText(context, "Logged out successfully", Toast.LENGTH_SHORT).show()
+        } catch (e: AppwriteException) {
+            e.printStackTrace()
+            Toast.makeText(context, "Error logging out", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Navigate back to the MainActivity
+        activity?.runOnUiThread {
+            val intent = Intent(requireActivity(), MainActivity::class.java)
+            startActivity(intent)
+            requireActivity().finish()
+        }
+    }
 
 
     private suspend fun fetchPlacesFromAppwrite(): List<Places> {
@@ -112,18 +132,12 @@ class AccountFragment : Fragment() {
 
 
                 // Show a Toast message with the placeString
-                Toast.makeText(this.context, "it is a toast", Toast.LENGTH_SHORT).show()
                 Log.d("Appwrite fetch place", place.toString())
 
             }
         } catch (e: AppwriteException) {
             e.printStackTrace()
         }
-        // Create new Places objects and add them to the list
-//        val place1 = Places("Museum of Modern Art", "11 W 53rd St, New York, NY 10019", 40.7614, -73.9776)
-//        val place2 = Places("Central Park", "New York, NY 10024", 40.7851, -73.9683)
-//        places.add(place1)
-//        places.add(place2)
 
         return places
     }
